@@ -15,9 +15,20 @@ A Windows utility that brings Linux-style middle-click paste functionality to Wi
 
 ## Installation
 
-1. Install AutoHotkey v2
+1. Install [AutoHotkey v2](https://www.autohotkey.com/)
 2. Double-click `MiddleClickPaste.ahk` to run
-3. (Optional) Add a shortcut to your Startup folder to run at login
+
+## Run on Startup
+
+To have the script start automatically when you log in:
+
+1. Press `Win + R` to open the Run dialog
+2. Type `shell:startup` and press Enter
+3. Right-click in the Startup folder and select **New > Shortcut**
+4. Browse to `MiddleClickPaste.ahk` or paste its full path
+5. Click **Next**, name it, and click **Finish**
+
+Alternatively, copy `MiddleClickPaste.ahk` directly into the Startup folder.
 
 ## Usage
 
@@ -44,4 +55,4 @@ The script only pastes when:
 
 ## License
 
-MIT
+[MIT](LICENSE) - Do whatever you want with this.

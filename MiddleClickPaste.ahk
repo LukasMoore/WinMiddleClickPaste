@@ -12,6 +12,14 @@ SourceWinHwnd := 0  ; Track which window the selection was made in
     MouseGetPos &StartX, &StartY, &SourceWinHwnd
 }
 
+; Check if window is an Office app (Word, Excel, Outlook, PowerPoint)
+IsOfficeApp(WinClass) {
+    return (WinClass = "OpusApp"           ; Word
+         || WinClass = "XLMAIN"            ; Excel
+         || WinClass = "rctrl_renwnd32"    ; Outlook
+         || WinClass = "PPTFrameClass")    ; PowerPoint
+}
+
 ; Check if window is a terminal (or terminal-like app)
 IsTerminalWindow(WinClass, WinHwnd := 0) {
     if (WinClass = "CASCADIA_HOSTING_WINDOW_CLASS"      ; Windows Terminal
@@ -87,8 +95,9 @@ CopyFromTerminal(WinHwnd) {
     MouseGetPos ,, &WinUnderMouse
     WinClass := WinGetClass(WinUnderMouse)
     IsTerminal := IsTerminalWindow(WinClass, WinUnderMouse)
+    IsOffice := IsOfficeApp(WinClass)
 
-    if (A_Cursor = "IBeam" || IsTerminal) {
+    if (A_Cursor = "IBeam" || IsTerminal || IsOffice) {
         OldClip := A_Clipboard
 
         ; Check if selection was made in a terminal (need to copy from there first)
@@ -126,8 +135,8 @@ CopyFromTerminal(WinHwnd) {
         WinActivate WinUnderMouse
         Sleep 30
 
-        ; Click to focus (skip for terminals - they don't need it)
-        if (!IsTerminal) {
+        ; Click to focus (skip for terminals and Office - they don't need it)
+        if (!IsTerminal && !IsOffice) {
             Click
             Sleep 30
         }

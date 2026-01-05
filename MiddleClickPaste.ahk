@@ -4,11 +4,12 @@
 SelectionClip := ""
 StartX := 0
 StartY := 0
+SourceWinHwnd := 0  ; Track which window the selection was made in
 
 ; Track where mouse drag starts
 ~LButton:: {
-    global StartX, StartY
-    MouseGetPos &StartX, &StartY
+    global StartX, StartY, SourceWinHwnd
+    MouseGetPos &StartX, &StartY, &SourceWinHwnd
 }
 
 ; Check if window is a terminal (or terminal-like app)
@@ -53,9 +54,35 @@ IsTerminalWindow(WinClass, WinHwnd := 0) {
     }
 }
 
+; Copy from a terminal window and return the copied text
+CopyFromTerminal(WinHwnd) {
+    WinClass := WinGetClass(WinHwnd)
+    OldClip := A_Clipboard
+    A_Clipboard := ""
+
+    WinActivate WinHwnd
+    if !WinWaitActive(WinHwnd,, 0.5)
+        return ""
+    Sleep 50
+
+    if (WinClass = "CASCADIA_HOSTING_WINDOW_CLASS")
+        SendInput "^+c"
+    else if (WinClass = "Chrome_WidgetWin_1")
+        SendInput "^+c"  ; VS Code terminal uses Ctrl+Shift+C
+    else
+        SendInput "^{Insert}"
+
+    result := ""
+    if ClipWait(0.5) {
+        result := A_Clipboard
+    }
+    A_Clipboard := OldClip
+    return result
+}
+
 ; Middle-click: paste only if cursor is over a text field or terminal
 ~MButton:: {
-    global SelectionClip
+    global SelectionClip, SourceWinHwnd
 
     MouseGetPos ,, &WinUnderMouse
     WinClass := WinGetClass(WinUnderMouse)
@@ -64,13 +91,25 @@ IsTerminalWindow(WinClass, WinHwnd := 0) {
     if (A_Cursor = "IBeam" || IsTerminal) {
         OldClip := A_Clipboard
 
-        ; For terminals: copy the selection now, then paste
-        if IsTerminal {
+        ; Check if selection was made in a terminal (need to copy from there first)
+        if (SourceWinHwnd && WinExist(SourceWinHwnd)) {
+            try {
+                SourceClass := WinGetClass(SourceWinHwnd)
+                if IsTerminalWindow(SourceClass, SourceWinHwnd) {
+                    copied := CopyFromTerminal(SourceWinHwnd)
+                    if (copied != "")
+                        SelectionClip := copied
+                }
+            }
+        }
+
+        ; For terminals as target: copy the selection now, then paste
+        if (IsTerminal && WinUnderMouse = SourceWinHwnd) {
             A_Clipboard := ""
             if (WinClass = "CASCADIA_HOSTING_WINDOW_CLASS")
                 SendInput "^+c"
             else if (WinClass = "Chrome_WidgetWin_1")
-                SendInput "^c"  ; VS Code uses standard Ctrl+C
+                SendInput "^+c"  ; VS Code terminal uses Ctrl+Shift+C
             else
                 SendInput "^{Insert}"
 

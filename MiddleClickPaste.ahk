@@ -5,6 +5,7 @@ SelectionClip := ""
 StartX := 0
 StartY := 0
 SourceWinHwnd := 0  ; Track which window the selection was made in
+TerminalSelectionHwnd := 0  ; Track terminal with pending selection (persists across clicks)
 
 ; Track where mouse drag starts
 ~LButton:: {
@@ -47,8 +48,15 @@ IsTerminalWindow(WinClass, WinHwnd := 0) {
         WinClass := WinGetClass(WinUnderMouse)
 
         ; Skip auto-copy for terminals - they'll copy on middle-click instead
-        if IsTerminalWindow(WinClass, WinUnderMouse)
+        if IsTerminalWindow(WinClass, WinUnderMouse) {
+            global TerminalSelectionHwnd
+            TerminalSelectionHwnd := WinUnderMouse  ; Remember this terminal has a pending selection
             return
+        }
+
+        ; Clear terminal selection when selecting in non-terminal
+        global TerminalSelectionHwnd
+        TerminalSelectionHwnd := 0
 
         Sleep 50
         OldClip := A_Clipboard
@@ -90,7 +98,7 @@ CopyFromTerminal(WinHwnd) {
 
 ; Middle-click: paste only if cursor is over a text field or terminal
 ~MButton:: {
-    global SelectionClip, SourceWinHwnd
+    global SelectionClip
 
     MouseGetPos ,, &WinUnderMouse
     WinClass := WinGetClass(WinUnderMouse)
@@ -101,29 +109,12 @@ CopyFromTerminal(WinHwnd) {
         OldClip := A_Clipboard
 
         ; Check if selection was made in a terminal (need to copy from there first)
-        if (SourceWinHwnd && WinExist(SourceWinHwnd)) {
-            try {
-                SourceClass := WinGetClass(SourceWinHwnd)
-                if IsTerminalWindow(SourceClass, SourceWinHwnd) {
-                    copied := CopyFromTerminal(SourceWinHwnd)
-                    if (copied != "")
-                        SelectionClip := copied
-                }
-            }
-        }
-
-        ; For terminals as target: copy the selection now, then paste
-        if (IsTerminal && WinUnderMouse = SourceWinHwnd) {
-            A_Clipboard := ""
-            if (WinClass = "CASCADIA_HOSTING_WINDOW_CLASS")
-                SendInput "^+c"
-            else if (WinClass = "Chrome_WidgetWin_1")
-                SendInput "^+c"  ; VS Code terminal uses Ctrl+Shift+C
-            else
-                SendInput "^{Insert}"
-
-            if ClipWait(0.3) {
-                SelectionClip := A_Clipboard
+        global TerminalSelectionHwnd
+        if (TerminalSelectionHwnd && WinExist(TerminalSelectionHwnd)) {
+            copied := CopyFromTerminal(TerminalSelectionHwnd)
+            if (copied != "") {
+                SelectionClip := copied
+                TerminalSelectionHwnd := 0  ; Clear after copying
             }
         }
 
@@ -143,7 +134,10 @@ CopyFromTerminal(WinHwnd) {
 
         ; Paste from buffer
         A_Clipboard := SelectionClip
-        SendInput "^v"
+        if (WinClass = "CASCADIA_HOSTING_WINDOW_CLASS" || (WinClass = "Chrome_WidgetWin_1" && IsTerminal))
+            SendInput "^+v"  ; Windows Terminal and VS Code terminal use Ctrl+Shift+V
+        else
+            SendInput "^v"
         Sleep 50
         A_Clipboard := OldClip
     }

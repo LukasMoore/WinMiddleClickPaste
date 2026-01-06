@@ -1,0 +1,13 @@
+# SVG assets
+*.svg
+
+# AutoHotkey compiled executables
+*.exe
+
+# Editor/IDE files
+.vscode/
+*.code-workspace
+
+# Windows
+Thumbs.db
+Desktop.ini

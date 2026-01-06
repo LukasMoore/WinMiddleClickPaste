@@ -1,13 +1,12 @@
 # MiddleClickPaste
 
-A Windows utility that brings Linux-style middle-click paste functionality to Windows using AutoHotkey v2.
+Linux-style middle-click paste for Windows using AutoHotkey v2.
 
 ## Features
 
-- **Selection Buffer**: Automatically copies text when you drag-select with the left mouse button
-- **Middle-Click Paste**: Pastes the selected text with middle-click (only in text fields and terminals)
-- **Non-Destructive**: Preserves your regular clipboard contents
-- **Terminal Support**: Works with Windows Terminal, cmd, PowerShell, Git Bash, and ConEmu
+- **Selection Buffer**: Drag-select text to copy it to a separate buffer
+- **Middle-Click Paste**: Paste selection with middle-click in text fields, terminals, or Office apps
+- **Non-Destructive**: Regular clipboard remains unchanged
 
 ## Requirements
 
@@ -18,34 +17,31 @@ A Windows utility that brings Linux-style middle-click paste functionality to Wi
 1. Install [AutoHotkey v2](https://www.autohotkey.com/)
 2. Double-click `MiddleClickPaste.ahk` to run
 
-## Run on Startup
-
-1. Press `Win + R`, type `shell:startup`, and press Enter
-2. Copy `MiddleClickPaste.ahk` into the Startup folder
+**Run on Startup**: Press `Win + R`, type `shell:startup`, copy the script there.
 
 ## Usage
 
-1. **Select text**: Drag to select text with the left mouse button
-2. **Paste**: Middle-click in any text field or terminal to paste the selection
+1. Drag-select text with left mouse button
+2. Middle-click to paste
 
-The script only pastes when:
-- The cursor is over a text input field (I-beam cursor), or
-- The cursor is over a supported terminal window
+Works when cursor is over:
+- Text input fields (I-beam cursor)
+- Supported terminals
+- Office apps
+
+## Supported Applications
+
+**Terminals**: Windows Terminal, cmd, PowerShell, Git Bash, ConEmu, VS Code
+
+**Office**: Word, Excel, Outlook, PowerPoint
 
 ## Keybindings
 
 | Key | Action |
 |-----|--------|
 | Middle-Click | Paste selection buffer |
-| F3 | Send a real middle-click (bypasses paste behavior) |
-
-## Supported Terminals
-
-- Windows Terminal
-- cmd / PowerShell console
-- Git Bash (mintty)
-- ConEmu
+| F3 | Send real middle-click |
 
 ## License
 
-[MIT](LICENSE) - Do whatever you want with this.
+MIT

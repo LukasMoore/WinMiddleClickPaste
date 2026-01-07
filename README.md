@@ -8,6 +8,9 @@ Linux-style middle-click paste for Windows using AutoHotkey v2.
 - **Middle-Click Paste**: Paste selection with middle-click in text fields, terminals, or Office apps
 - **Clipboard Preservation**: Full clipboard state preserved (text, images, RTF, and all formats)
 - **Terminal Support**: Uses correct copy/paste shortcuts for each terminal type
+- **UWP App Support**: Works with Windows Store apps (WhatsApp, etc.)
+- **Electron App Support**: Works with Teams, Slack, Discord, Chrome, Edge, Firefox
+- **Multi-Monitor Support**: Works correctly across multiple monitors
 
 ## Requirements
 
@@ -29,6 +32,8 @@ Works when cursor is over:
 - Text input fields (I-beam cursor)
 - Supported terminals
 - Office apps
+- UWP apps (WhatsApp, etc.)
+- Electron apps (Teams, Slack, browsers)
 
 ## Supported Applications
 
@@ -36,18 +41,38 @@ Works when cursor is over:
 
 **Office**: Word, Excel, Outlook, PowerPoint
 
+**UWP Apps**: WhatsApp, and other Windows Store apps
+
+**Electron Apps**: Microsoft Teams, Slack, Discord, Chrome, Edge, Firefox
+
 ## Keybindings
 
 | Key | Action |
 |-----|--------|
 | Middle-Click | Paste from selection buffer |
 | F3 | Send native middle-click (for scrolling, etc.) |
+| F4 | Toggle debug logging |
+| F5 | Clear debug log |
+| F6 | Open debug log file |
 
 ## How It Works
 
-- Standard apps: Text is copied immediately on drag-select using Ctrl+C
-- Terminals: Selection is tracked, copied on paste using Ctrl+Shift+C (or Ctrl+Insert for legacy terminals)
-- Paste uses Ctrl+V (or Ctrl+Shift+V for terminals)
+- **Standard apps**: Text is copied immediately on drag-select using Ctrl+C
+- **Terminals**: Uses Ctrl+Shift+C (or Ctrl+Insert for legacy terminals)
+- **UWP/Electron apps**: Uses SendEvent with timing delays for reliability
+- **Paste**: Uses Ctrl+V (or Ctrl+Shift+V for terminals)
+
+## Troubleshooting
+
+If paste isn't working in an app:
+1. Press F4 to enable debug logging
+2. Try the paste operation
+3. Press F6 to open the log file
+4. Check what window class/process is detected
+
+Common issues:
+- **UWP apps**: Handled automatically via `WinUIDesktopWin32WindowClass` detection
+- **Electron apps**: Detected by process name (Teams.exe, slack.exe, etc.)
 
 ## License
 

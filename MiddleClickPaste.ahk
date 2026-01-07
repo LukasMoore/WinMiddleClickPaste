@@ -1,147 +1,259 @@
 #Requires AutoHotkey v2.0
 #SingleInstance Force
 
-SelectionClip := ""
-StartX := 0
-StartY := 0
-SourceWinHwnd := 0  ; Track which window the selection was made in
-TerminalSelectionHwnd := 0  ; Track terminal with pending selection (persists across clicks)
-
-; Track where mouse drag starts
-~LButton:: {
-    global StartX, StartY, SourceWinHwnd
-    MouseGetPos &StartX, &StartY, &SourceWinHwnd
+; === Configuration ===
+global Config := {
+    DragThreshold: 10,          ; Minimum pixels to consider a drag selection
+    CopyWaitTime: 0.3,          ; Seconds to wait for clipboard after copy
+    TerminalCopyWait: 0.5,      ; Seconds to wait for terminal copy
+    ActivateWait: 0.5,          ; Seconds to wait for window activation
+    PostActionDelay: 50         ; Milliseconds delay after actions
 }
 
-; Check if window is an Office app (Word, Excel, Outlook, PowerPoint)
+; === State ===
+global State := {
+    SelectionClip: "",
+    StartX: 0,
+    StartY: 0,
+    TerminalSelectionHwnd: 0
+}
+
+; === Window Classification ===
+
+; Office apps that support text input
+OfficeClasses := Map(
+    "OpusApp", true,            ; Word
+    "XLMAIN", true,             ; Excel
+    "rctrl_renwnd32", true,     ; Outlook
+    "PPTFrameClass", true       ; PowerPoint
+)
+
+; Terminal window classes
+TerminalClasses := Map(
+    "CASCADIA_HOSTING_WINDOW_CLASS", true,  ; Windows Terminal
+    "ConsoleWindowClass", true,              ; cmd/PowerShell
+    "mintty", true,                          ; Git Bash
+    "VirtualConsoleClass", true              ; ConEmu
+)
+
 IsOfficeApp(WinClass) {
-    return (WinClass = "OpusApp"           ; Word
-         || WinClass = "XLMAIN"            ; Excel
-         || WinClass = "rctrl_renwnd32"    ; Outlook
-         || WinClass = "PPTFrameClass")    ; PowerPoint
+    global OfficeClasses
+    return OfficeClasses.Has(WinClass)
 }
 
-; Check if window is a terminal (or terminal-like app)
 IsTerminalWindow(WinClass, WinHwnd := 0) {
-    if (WinClass = "CASCADIA_HOSTING_WINDOW_CLASS"      ; Windows Terminal
-     || WinClass = "ConsoleWindowClass"                 ; cmd/PowerShell
-     || WinClass = "mintty"                             ; Git Bash
-     || WinClass = "VirtualConsoleClass")               ; ConEmu
+    global TerminalClasses
+    if TerminalClasses.Has(WinClass)
         return true
 
-    ; Check for VS Code specifically (not all Electron apps)
+    ; Check for VS Code (Electron app with specific process)
     if (WinClass = "Chrome_WidgetWin_1" && WinHwnd) {
         try {
             ProcName := ProcessGetName(WinGetPID(WinHwnd))
-            if (ProcName = "Code.exe")
-                return true
+            return (ProcName = "Code.exe")
+        } catch {
+            return false
         }
     }
     return false
 }
 
-; On release, if mouse moved (drag select), copy to buffer (skip for terminals)
-~LButton Up:: {
-    global SelectionClip, StartX, StartY
-    MouseGetPos &EndX, &EndY, &WinUnderMouse
-    if (Abs(EndX - StartX) > 10 || Abs(EndY - StartY) > 10) {
-        WinClass := WinGetClass(WinUnderMouse)
+; === Safe Window Operations ===
 
-        ; Skip auto-copy for terminals - they'll copy on middle-click instead
-        if IsTerminalWindow(WinClass, WinUnderMouse) {
-            global TerminalSelectionHwnd
-            TerminalSelectionHwnd := WinUnderMouse  ; Remember this terminal has a pending selection
-            return
-        }
-
-        ; Clear terminal selection when selecting in non-terminal
-        global TerminalSelectionHwnd
-        TerminalSelectionHwnd := 0
-
-        Sleep 50
-        OldClip := A_Clipboard
-        A_Clipboard := ""
-        SendInput "^c"
-
-        if ClipWait(0.3) {
-            SelectionClip := A_Clipboard
-        }
-        A_Clipboard := OldClip
+SafeGetClass(WinHwnd) {
+    try {
+        return WinGetClass(WinHwnd)
+    } catch {
+        return ""
     }
 }
 
-; Copy from a terminal window and return the copied text
-CopyFromTerminal(WinHwnd) {
-    WinClass := WinGetClass(WinHwnd)
-    OldClip := A_Clipboard
+SafeWinExists(WinHwnd) {
+    try {
+        return WinExist(WinHwnd)
+    } catch {
+        return false
+    }
+}
+
+SafeWinActivate(WinHwnd) {
+    try {
+        if !WinExist(WinHwnd)
+            return false
+        WinActivate(WinHwnd)
+        return WinWaitActive(WinHwnd,, Config.ActivateWait)
+    } catch {
+        return false
+    }
+}
+
+; === Clipboard Operations ===
+
+; Preserve full clipboard state (including formats like images, RTF)
+GetClipboardBackup() {
+    try {
+        return ClipboardAll()
+    } catch {
+        return ""
+    }
+}
+
+RestoreClipboard(backup) {
+    try {
+        if (backup != "")
+            A_Clipboard := backup
+    } catch {
+        ; Clipboard restore failed - not critical
+    }
+}
+
+; Copy text from current selection
+CopySelection(waitTime := 0.3) {
+    clipBackup := GetClipboardBackup()
     A_Clipboard := ""
 
-    WinActivate WinHwnd
-    if !WinWaitActive(WinHwnd,, 0.5)
-        return ""
-    Sleep 50
+    SendInput "^c"
 
-    if (WinClass = "CASCADIA_HOSTING_WINDOW_CLASS")
+    if ClipWait(waitTime) {
+        result := A_Clipboard
+        RestoreClipboard(clipBackup)
+        return result
+    }
+
+    RestoreClipboard(clipBackup)
+    return ""
+}
+
+; Copy from terminal using appropriate shortcut
+CopyFromTerminal(WinHwnd) {
+    WinClass := SafeGetClass(WinHwnd)
+    if (WinClass = "")
+        return ""
+
+    if !SafeWinActivate(WinHwnd)
+        return ""
+
+    Sleep Config.PostActionDelay
+
+    clipBackup := GetClipboardBackup()
+    A_Clipboard := ""
+
+    ; Use appropriate copy shortcut for terminal type
+    if (WinClass = "CASCADIA_HOSTING_WINDOW_CLASS" || WinClass = "Chrome_WidgetWin_1")
         SendInput "^+c"
-    else if (WinClass = "Chrome_WidgetWin_1")
-        SendInput "^+c"  ; VS Code terminal uses Ctrl+Shift+C
     else
         SendInput "^{Insert}"
 
     result := ""
-    if ClipWait(0.5) {
+    if ClipWait(Config.TerminalCopyWait)
         result := A_Clipboard
-    }
-    A_Clipboard := OldClip
+
+    RestoreClipboard(clipBackup)
     return result
 }
 
-; Middle-click: paste only if cursor is over a text field or terminal
-~MButton:: {
-    global SelectionClip
+; Paste text to current window
+PasteToWindow(text, WinClass, IsTerminal) {
+    if (text = "")
+        return false
 
-    MouseGetPos ,, &WinUnderMouse
-    WinClass := WinGetClass(WinUnderMouse)
+    clipBackup := GetClipboardBackup()
+    A_Clipboard := text
+
+    ; Use appropriate paste shortcut
+    if (WinClass = "CASCADIA_HOSTING_WINDOW_CLASS" || (WinClass = "Chrome_WidgetWin_1" && IsTerminal))
+        SendInput "^+v"
+    else
+        SendInput "^v"
+
+    Sleep Config.PostActionDelay
+    RestoreClipboard(clipBackup)
+    return true
+}
+
+; === Hotkeys ===
+
+; Track drag start position
+~LButton:: {
+    global State
+    MouseGetPos &x, &y
+    State.StartX := x
+    State.StartY := y
+}
+
+; On drag release, capture selection (except in terminals)
+~LButton Up:: {
+    global State, Config
+
+    MouseGetPos &EndX, &EndY, &WinUnderMouse
+
+    ; Check if this was a drag (not just a click)
+    if (Abs(EndX - State.StartX) <= Config.DragThreshold
+        && Abs(EndY - State.StartY) <= Config.DragThreshold)
+        return
+
+    WinClass := SafeGetClass(WinUnderMouse)
+    if (WinClass = "")
+        return
+
+    ; For terminals, defer copy until paste time
+    if IsTerminalWindow(WinClass, WinUnderMouse) {
+        State.TerminalSelectionHwnd := WinUnderMouse
+        return
+    }
+
+    ; Clear any pending terminal selection
+    State.TerminalSelectionHwnd := 0
+
+    ; Brief delay for selection to complete
+    Sleep Config.PostActionDelay
+
+    copied := CopySelection(Config.CopyWaitTime)
+    if (copied != "")
+        State.SelectionClip := copied
+}
+
+; Middle-click paste (only in text-accepting contexts)
+~MButton:: {
+    global State
+
+    MouseGetPos &MouseX, &MouseY, &WinUnderMouse
+    WinClass := SafeGetClass(WinUnderMouse)
+    if (WinClass = "")
+        return
+
     IsTerminal := IsTerminalWindow(WinClass, WinUnderMouse)
     IsOffice := IsOfficeApp(WinClass)
 
-    if (A_Cursor = "IBeam" || IsTerminal || IsOffice) {
-        OldClip := A_Clipboard
+    ; Only paste if cursor indicates text input, or in terminal/Office
+    if !(A_Cursor = "IBeam" || IsTerminal || IsOffice)
+        return
 
-        ; Check if selection was made in a terminal (need to copy from there first)
-        global TerminalSelectionHwnd
-        if (TerminalSelectionHwnd && WinExist(TerminalSelectionHwnd)) {
-            copied := CopyFromTerminal(TerminalSelectionHwnd)
-            if (copied != "") {
-                SelectionClip := copied
-                TerminalSelectionHwnd := 0  ; Clear after copying
-            }
+    ; If there's a pending terminal selection, copy it now
+    if (State.TerminalSelectionHwnd && SafeWinExists(State.TerminalSelectionHwnd)) {
+        copied := CopyFromTerminal(State.TerminalSelectionHwnd)
+        if (copied != "") {
+            State.SelectionClip := copied
+            State.TerminalSelectionHwnd := 0
         }
-
-        if (SelectionClip = "") {
-            A_Clipboard := OldClip
-            return
-        }
-
-        WinActivate WinUnderMouse
-        Sleep 30
-
-        ; Click to focus (skip for terminals and Office - they don't need it)
-        if (!IsTerminal && !IsOffice) {
-            Click
-            Sleep 30
-        }
-
-        ; Paste from buffer
-        A_Clipboard := SelectionClip
-        if (WinClass = "CASCADIA_HOSTING_WINDOW_CLASS" || (WinClass = "Chrome_WidgetWin_1" && IsTerminal))
-            SendInput "^+v"  ; Windows Terminal and VS Code terminal use Ctrl+Shift+V
-        else
-            SendInput "^v"
-        Sleep 50
-        A_Clipboard := OldClip
     }
+
+    ; Nothing to paste
+    if (State.SelectionClip = "")
+        return
+
+    ; Activate target window
+    if !SafeWinActivate(WinUnderMouse)
+        return
+
+    ; For standard apps (not terminal/Office), click to place cursor
+    if (!IsTerminal && !IsOffice) {
+        Click MouseX, MouseY
+        Sleep Config.PostActionDelay
+    }
+
+    PasteToWindow(State.SelectionClip, WinClass, IsTerminal)
 }
 
-; F3 sends real middle-click if needed
-F3:: SendInput "{MButton}"
+; Fallback: F3 sends native middle-click (for scroll wheel, etc.)
+F3::SendInput "{MButton}"

@@ -4,9 +4,10 @@ Linux-style middle-click paste for Windows using AutoHotkey v2.
 
 ## Features
 
-- **Selection Buffer**: Drag-select text to copy it to a separate buffer
+- **Selection Buffer**: Drag-select text to automatically copy it to a separate buffer
 - **Middle-Click Paste**: Paste selection with middle-click in text fields, terminals, or Office apps
-- **Non-Destructive**: Regular clipboard remains unchanged
+- **Clipboard Preservation**: Full clipboard state preserved (text, images, RTF, and all formats)
+- **Terminal Support**: Deferred copy for terminals (copies on paste to avoid interfering with terminal selection)
 
 ## Requirements
 
@@ -17,7 +18,7 @@ Linux-style middle-click paste for Windows using AutoHotkey v2.
 1. Install [AutoHotkey v2](https://www.autohotkey.com/)
 2. Double-click `MiddleClickPaste.ahk` to run
 
-**Run on Startup**: Press `Win + R`, type `shell:startup`, copy the script there.
+**Run on Startup**: Press `Win+R`, type `shell:startup`, copy the script there.
 
 ## Usage
 
@@ -31,7 +32,7 @@ Works when cursor is over:
 
 ## Supported Applications
 
-**Terminals**: Windows Terminal, cmd, PowerShell, Git Bash, ConEmu, VS Code
+**Terminals**: Windows Terminal, cmd, PowerShell, Git Bash (mintty), ConEmu, VS Code (integrated terminal)
 
 **Office**: Word, Excel, Outlook, PowerPoint
 
@@ -39,8 +40,14 @@ Works when cursor is over:
 
 | Key | Action |
 |-----|--------|
-| Middle-Click | Paste selection buffer |
-| F3 | Send real middle-click |
+| Middle-Click | Paste from selection buffer |
+| F3 | Send native middle-click (for scrolling, etc.) |
+
+## How It Works
+
+- Standard apps: Text is copied immediately on drag-select using Ctrl+C
+- Terminals: Selection is tracked, copied on paste using Ctrl+Shift+C (or Ctrl+Insert for legacy terminals)
+- Paste uses Ctrl+V (or Ctrl+Shift+V for terminals)
 
 ## License
 

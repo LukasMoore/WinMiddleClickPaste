@@ -166,6 +166,10 @@ PasteToWindow(text, WinClass, IsTerminal) {
         && Abs(EndY - State.StartY) <= Config.DragThreshold)
         return
 
+    ; Only attempt copy if cursor indicates text selection context
+    if (A_Cursor != "IBeam")
+        return
+
     WinClass := SafeGetClass(WinUnderMouse)
     if (WinClass = "")
         return

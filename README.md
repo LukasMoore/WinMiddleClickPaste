@@ -7,7 +7,7 @@ Linux-style middle-click paste for Windows using AutoHotkey v2.
 - **Selection Buffer**: Drag-select text to automatically copy it to a separate buffer
 - **Middle-Click Paste**: Paste selection with middle-click in text fields, terminals, or Office apps
 - **Clipboard Preservation**: Full clipboard state preserved (text, images, RTF, and all formats)
-- **Terminal Support**: Deferred copy for terminals (copies on paste to avoid interfering with terminal selection)
+- **Terminal Support**: Uses correct copy/paste shortcuts for each terminal type
 
 ## Requirements
 

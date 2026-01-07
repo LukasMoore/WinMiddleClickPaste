@@ -14,8 +14,7 @@ global Config := {
 global State := {
     SelectionClip: "",
     StartX: 0,
-    StartY: 0,
-    TerminalSelectionHwnd: 0
+    StartY: 0
 }
 
 ; === Window Classification ===
@@ -68,14 +67,6 @@ SafeGetClass(WinHwnd) {
     }
 }
 
-SafeWinExists(WinHwnd) {
-    try {
-        return WinExist(WinHwnd)
-    } catch {
-        return false
-    }
-}
-
 SafeWinActivate(WinHwnd) {
     try {
         if !WinExist(WinHwnd)
@@ -107,12 +98,12 @@ RestoreClipboard(backup) {
     }
 }
 
-; Copy text from current selection
-CopySelection(waitTime := 0.3) {
+; Copy text from current selection using specified shortcut
+CopySelection(shortcut := "^c", waitTime := 0.3) {
     clipBackup := GetClipboardBackup()
     A_Clipboard := ""
 
-    SendInput "^c"
+    SendInput shortcut
 
     if ClipWait(waitTime) {
         result := A_Clipboard
@@ -124,32 +115,15 @@ CopySelection(waitTime := 0.3) {
     return ""
 }
 
-; Copy from terminal using appropriate shortcut
-CopyFromTerminal(WinHwnd) {
-    WinClass := SafeGetClass(WinHwnd)
-    if (WinClass = "")
-        return ""
-
-    if !SafeWinActivate(WinHwnd)
-        return ""
-
-    Sleep Config.PostActionDelay
-
-    clipBackup := GetClipboardBackup()
-    A_Clipboard := ""
-
-    ; Use appropriate copy shortcut for terminal type
+; Get the appropriate copy shortcut for a window
+GetCopyShortcut(WinClass, IsTerminal) {
+    if (!IsTerminal)
+        return "^c"
+    ; Modern terminals (Windows Terminal, VS Code) use Ctrl+Shift+C
     if (WinClass = "CASCADIA_HOSTING_WINDOW_CLASS" || WinClass = "Chrome_WidgetWin_1")
-        SendInput "^+c"
-    else
-        SendInput "^{Insert}"
-
-    result := ""
-    if ClipWait(Config.TerminalCopyWait)
-        result := A_Clipboard
-
-    RestoreClipboard(clipBackup)
-    return result
+        return "^+c"
+    ; Legacy terminals (cmd, ConEmu, mintty) use Ctrl+Insert
+    return "^{Insert}"
 }
 
 ; Paste text to current window
@@ -181,7 +155,7 @@ PasteToWindow(text, WinClass, IsTerminal) {
     State.StartY := y
 }
 
-; On drag release, capture selection (except in terminals)
+; On drag release, capture selection
 ~LButton Up:: {
     global State, Config
 
@@ -196,19 +170,15 @@ PasteToWindow(text, WinClass, IsTerminal) {
     if (WinClass = "")
         return
 
-    ; For terminals, defer copy until paste time
-    if IsTerminalWindow(WinClass, WinUnderMouse) {
-        State.TerminalSelectionHwnd := WinUnderMouse
-        return
-    }
-
-    ; Clear any pending terminal selection
-    State.TerminalSelectionHwnd := 0
-
     ; Brief delay for selection to complete
     Sleep Config.PostActionDelay
 
-    copied := CopySelection(Config.CopyWaitTime)
+    ; Use appropriate copy shortcut based on window type
+    IsTerminal := IsTerminalWindow(WinClass, WinUnderMouse)
+    copyShortcut := GetCopyShortcut(WinClass, IsTerminal)
+    waitTime := IsTerminal ? Config.TerminalCopyWait : Config.CopyWaitTime
+
+    copied := CopySelection(copyShortcut, waitTime)
     if (copied != "")
         State.SelectionClip := copied
 }
@@ -228,15 +198,6 @@ PasteToWindow(text, WinClass, IsTerminal) {
     ; Only paste if cursor indicates text input, or in terminal/Office
     if !(A_Cursor = "IBeam" || IsTerminal || IsOffice)
         return
-
-    ; If there's a pending terminal selection, copy it now
-    if (State.TerminalSelectionHwnd && SafeWinExists(State.TerminalSelectionHwnd)) {
-        copied := CopyFromTerminal(State.TerminalSelectionHwnd)
-        if (copied != "") {
-            State.SelectionClip := copied
-            State.TerminalSelectionHwnd := 0
-        }
-    }
 
     ; Nothing to paste
     if (State.SelectionClip = "")

@@ -50,10 +50,8 @@ Works when cursor is over:
 | Key | Action |
 |-----|--------|
 | Middle-Click | Paste from selection buffer |
-| F3 | Send native middle-click (for scrolling, etc.) |
+| F3 | Pause/unpause script |
 | F4 | Toggle debug logging |
-| F5 | Clear debug log |
-| F6 | Open debug log file |
 
 ## How It Works
 
@@ -67,7 +65,7 @@ Works when cursor is over:
 If paste isn't working in an app:
 1. Press F4 to enable debug logging
 2. Try the paste operation
-3. Press F6 to open the log file
+3. Open `debug.log` in the script directory
 4. Check what window class/process is detected
 
 Common issues:

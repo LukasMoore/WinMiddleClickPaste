@@ -8,7 +8,7 @@
 CoordMode "Mouse", "Screen"
 
 ; === Debug Mode ===
-global DebugMode := false  ; F4 to toggle, F5 to clear, F6 to open log
+global DebugMode := false  ; F4 to toggle
 global DebugLogFile := A_ScriptDir "\debug.log"
 
 DebugMsg(msg) {
@@ -26,16 +26,6 @@ DebugMsg(msg) {
     }
 }
 
-DebugClear() {
-    global DebugLogFile
-    try {
-        FileDelete DebugLogFile
-    } catch {
-        ; File doesn't exist or can't delete - ignore
-    }
-    DebugMsg("=== LOG CLEARED ===")
-}
-
 ; F4 to toggle debug mode
 F4:: {
     global DebugMode, DebugLogFile
@@ -50,23 +40,8 @@ F4:: {
     }
 }
 
-; F5 to clear debug log
-F5:: {
-    DebugClear()
-    ToolTip "Log cleared", 10, 10
-    SetTimer () => ToolTip(), -2000
-}
-
-; F6 to open log file
-F6:: {
-    global DebugLogFile
-    if FileExist(DebugLogFile)
-        Run DebugLogFile
-    else {
-        ToolTip "No log file yet", 10, 10
-        SetTimer () => ToolTip(), -2000
-    }
-}
+; F3 to toggle script on/off
+F3::Pause -1  ; Toggle pause state
 
 GetProcessName(WinHwnd) {
     try {
@@ -90,7 +65,10 @@ global State := {
     SelectionClip: "",
     StartX: 0,
     StartY: 0,
-    HadTextCursor: false  ; Track if cursor was text-type during drag
+    HadTextCursor: false,           ; Track if cursor was text-type during drag
+    PendingSelectionHwnd: 0,        ; Window with uncommitted selection (terminal/VS Code)
+    PendingSelectionClass: "",      ; Class of that window
+    PendingIsTerminal: false        ; True if terminal (affects copy shortcut)
 }
 
 ; === Window Classification ===
@@ -120,16 +98,9 @@ IsTerminalWindow(WinClass, WinHwnd := 0) {
     global TerminalClasses
     if TerminalClasses.Has(WinClass)
         return true
-
-    ; Check for VS Code (Electron app with specific process)
-    if (WinClass = "Chrome_WidgetWin_1" && WinHwnd) {
-        try {
-            ProcName := ProcessGetName(WinGetPID(WinHwnd))
-            return (ProcName = "Code.exe")
-        } catch {
-            return false
-        }
-    }
+    ; Note: VS Code (Code.exe) is NOT treated as a terminal here.
+    ; VS Code's editor uses ^c for copy. Using ^+c would open a terminal instead.
+    ; Even VS Code's integrated terminal accepts ^c for copying.
     return false
 }
 
@@ -183,6 +154,19 @@ IsTeamsApp(WinHwnd) {
     }
 }
 
+; Check if window is VS Code (needs deferred copy like terminals)
+IsVSCode(WinHwnd) {
+    try {
+        WinClass := WinGetClass(WinHwnd)
+        if (WinClass != "Chrome_WidgetWin_1")
+            return false
+        ProcName := ProcessGetName(WinGetPID(WinHwnd))
+        return (ProcName = "Code.exe")
+    } catch {
+        return false
+    }
+}
+
 ; Check if window is a UWP app that needs direct paste (no click)
 ; These apps don't handle the extra left-click well
 IsDirectPasteApp(WinHwnd) {
@@ -199,7 +183,8 @@ IsDirectPasteApp(WinHwnd) {
             "WhatsApp.exe", true,
             "WhatsApp.Root.exe", true,
             "ms-teams.exe", true,
-            "Teams.exe", true
+            "Teams.exe", true,
+            "steamwebhelper.exe", true
         )
         return directPasteApps.Has(ProcName)
     } catch {
@@ -230,28 +215,9 @@ SafeWinActivate(WinHwnd) {
 
 ; === Clipboard Operations ===
 
-; Preserve full clipboard state (including formats like images, RTF)
-GetClipboardBackup() {
-    try {
-        return ClipboardAll()
-    } catch {
-        return ""
-    }
-}
-
-RestoreClipboard(backup) {
-    try {
-        if (backup != "")
-            A_Clipboard := backup
-    } catch {
-        ; Clipboard restore failed - not critical
-    }
-}
-
 ; Copy text from current selection using specified shortcut
 CopySelection(shortcut := "^c", waitTime := 0.3) {
     DebugMsg("COPY: Starting, shortcut=" shortcut " wait=" waitTime)
-    clipBackup := GetClipboardBackup()
     A_Clipboard := ""  ; Must be empty for ClipWait detection to work
 
     ; Small delay to ensure clipboard is ready to receive
@@ -271,16 +237,12 @@ CopySelection(shortcut := "^c", waitTime := 0.3) {
         resultLen := StrLen(result)
         DebugMsg("COPY: Got " resultLen " chars")
         if (result != "") {
-            RestoreClipboard(clipBackup)
-            clipBackup := ""  ; Free memory per docs
             DebugMsg("COPY: SUCCESS - '" SubStr(result, 1, 30) (resultLen > 30 ? "..." : "") "'")
             return result
         }
     }
 
     DebugMsg("COPY: FAILED - ClipWait timeout or empty")
-    RestoreClipboard(clipBackup)
-    clipBackup := ""  ; Free memory per docs
     return ""
 }
 
@@ -303,7 +265,6 @@ PasteToWindow(text, WinClass, IsTerminal, IsElectronApp := false) {
         return false
     }
 
-    clipBackup := GetClipboardBackup()
     A_Clipboard := text
     DebugMsg("PASTE: Clipboard set, " StrLen(text) " chars")
 
@@ -324,9 +285,6 @@ PasteToWindow(text, WinClass, IsTerminal, IsElectronApp := false) {
         SendInput "^v"
     }
 
-    Sleep Config.PostActionDelay
-    RestoreClipboard(clipBackup)
-    clipBackup := ""  ; Free memory per docs
     DebugMsg("PASTE: Complete")
     return true
 }
@@ -386,30 +344,44 @@ MonitorDragCursor() {
         return
     }
 
-    ; Check if this is an Electron/browser app (Teams, Slack, Chrome, etc.)
-    ; These apps may not show IBeam cursor but still support text selection
+    ; Check window types that don't use IBeam cursor but still support text selection
     IsElectronApp := IsElectronTextApp(WinUnderMouse)
-    DebugMsg("LBTN UP: HadTextCursor=" State.HadTextCursor " IsElectron=" IsElectronApp)
+    IsTerminal := IsTerminalWindow(WinClass, WinUnderMouse)
+    IsVSCodeApp := IsVSCode(WinUnderMouse)
+    DebugMsg("LBTN UP: HadTextCursor=" State.HadTextCursor " IsElectron=" IsElectronApp " IsTerminal=" IsTerminal " IsVSCode=" IsVSCodeApp)
 
     ; Only attempt copy if:
     ; 1. Cursor was IBeam at any point during drag, OR
-    ; 2. This is a known Electron app (cursor detection unreliable)
-    if (!State.HadTextCursor && !IsElectronApp) {
-        DebugMsg("LBTN UP: No text cursor and not Electron, SKIP copy")
+    ; 2. This is a known Electron app (cursor detection unreliable), OR
+    ; 3. This is a terminal (terminals use Arrow cursor for selection)
+    if (!State.HadTextCursor && !IsElectronApp && !IsTerminal) {
+        DebugMsg("LBTN UP: No text cursor and not Electron/Terminal, SKIP copy")
         return
     }
+
+    ; For terminals and VS Code: defer copy until paste time to preserve visible selection
+    if (IsTerminal || IsVSCodeApp) {
+        State.PendingSelectionHwnd := WinUnderMouse
+        State.PendingSelectionClass := WinClass
+        State.PendingIsTerminal := IsTerminal
+        DebugMsg("LBTN UP: Selection stored for deferred copy (hwnd=" WinUnderMouse " terminal=" IsTerminal ")")
+        return
+    }
+
+    ; Clear any pending selection since we're selecting elsewhere
+    State.PendingSelectionHwnd := 0
+    State.PendingSelectionClass := ""
+    State.PendingIsTerminal := false
 
     ; Give the application time to register the selection
     DebugMsg("LBTN UP: Waiting 100ms for selection...")
     Sleep 100
 
     ; Use appropriate copy shortcut based on window type
-    IsTerminal := IsTerminalWindow(WinClass, WinUnderMouse)
-    copyShortcut := GetCopyShortcut(WinClass, IsTerminal)
-    waitTime := IsTerminal ? Config.TerminalCopyWait : Config.CopyWaitTime
-    DebugMsg("LBTN UP: Copying with " copyShortcut " (terminal=" IsTerminal ")")
+    copyShortcut := GetCopyShortcut(WinClass, false)
+    DebugMsg("LBTN UP: Copying with " copyShortcut)
 
-    copied := CopySelection(copyShortcut, waitTime)
+    copied := CopySelection(copyShortcut, Config.CopyWaitTime)
     if (copied != "") {
         State.SelectionClip := copied
         DebugMsg("LBTN UP: Stored " StrLen(copied) " chars in SelectionClip")
@@ -455,6 +427,33 @@ MonitorDragCursor() {
         return
     }
 
+    ; Handle deferred copy - selection is still visible in terminal/VS Code
+    if (State.PendingSelectionHwnd != 0) {
+        DebugMsg("MBTN: Pending selection, copying now from hwnd=" State.PendingSelectionHwnd " (terminal=" State.PendingIsTerminal ")")
+
+        ; Activate source window to copy from it
+        if SafeWinActivate(State.PendingSelectionHwnd) {
+            Sleep 50
+            copyShortcut := GetCopyShortcut(State.PendingSelectionClass, State.PendingIsTerminal)
+            waitTime := State.PendingIsTerminal ? Config.TerminalCopyWait : Config.CopyWaitTime
+            DebugMsg("MBTN: Copying with " copyShortcut)
+            copied := CopySelection(copyShortcut, waitTime)
+            if (copied != "") {
+                State.SelectionClip := copied
+                DebugMsg("MBTN: Got " StrLen(copied) " chars")
+            } else {
+                DebugMsg("MBTN: Deferred copy failed")
+            }
+        } else {
+            DebugMsg("MBTN: Could not activate source window")
+        }
+
+        ; Clear pending state
+        State.PendingSelectionHwnd := 0
+        State.PendingSelectionClass := ""
+        State.PendingIsTerminal := false
+    }
+
     ; Nothing to paste
     clipLen := StrLen(State.SelectionClip)
     DebugMsg("MBTN: SelectionClip has " clipLen " chars")
@@ -471,26 +470,17 @@ MonitorDragCursor() {
     if (IsTeams || IsDirectPaste) {
         DebugMsg("MBTN: DIRECT PASTE PATH (Teams/UWP)")
 
-        ; Backup and set clipboard
-        clipBackup := GetClipboardBackup()
         A_Clipboard := State.SelectionClip
         DebugMsg("MBTN: Clipboard set to " StrLen(State.SelectionClip) " chars")
 
-        ; Verify clipboard was set
+        ; Small delay to ensure clipboard is set
         Sleep 50
-        clipCheck := A_Clipboard
-        DebugMsg("MBTN: Clipboard verify: " StrLen(clipCheck) " chars")
 
-        ; Try SendEvent with key delay (more reliable than SendInput for some apps)
+        ; Use SendEvent with key delay (more reliable than SendInput for some apps)
         DebugMsg("MBTN: Sending ^v via SendEvent")
         SetKeyDelay 50, 50
         SendEvent "^v"
 
-        ; IMPORTANT: Wait longer before restoring - app needs time to read clipboard
-        DebugMsg("MBTN: Waiting 500ms for paste to complete...")
-        Sleep 500
-
-        RestoreClipboard(clipBackup)
         DebugMsg("MBTN: Direct paste complete")
         return
     }
@@ -523,6 +513,3 @@ MonitorDragCursor() {
     PasteToWindow(State.SelectionClip, WinClass, IsTerminal, false)
     DebugMsg("MBTN: Complete")
 }
-
-; Fallback: F3 sends native middle-click (for scroll wheel, etc.)
-F3::SendInput "{MButton}"
